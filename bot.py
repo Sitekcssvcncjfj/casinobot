@@ -24,7 +24,7 @@ DB_NAME = "casino.db"
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/")
-ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.me/")
+ADD_GROUP_URL = "https://t.me/kgbcasinobot?startgroup=true"
 
 START_BALANCE = 1000
 DAILY_REWARD = 500
