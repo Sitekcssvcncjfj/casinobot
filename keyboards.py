@@ -4,10 +4,10 @@ def main_menu():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"),
-            InlineKeyboardButton("📊 Profil", callback_data="menu_profile"),
+            InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
         ],
         [
-            InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
+            InlineKeyboardButton("📊 Profil", callback_data="menu_profile"),
             InlineKeyboardButton("🏦 Banka", callback_data="menu_bank"),
         ],
         [
@@ -16,7 +16,7 @@ def main_menu():
         ],
         [
             InlineKeyboardButton("🎒 Envanter", callback_data="menu_inventory"),
-            InlineKeyboardButton("🏆 Top", callback_data="menu_top"),
+            InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"),
         ],
         [
             InlineKeyboardButton("📜 Görevler", callback_data="menu_missions"),
