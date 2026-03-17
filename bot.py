@@ -15,10 +15,25 @@ from telegram.ext import (
 )
 
 # =========================
-# CONFIG
+# CONFIG / ENV
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
+
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("DATABASE_PUBLIC_URL")
+)
+
+if not DATABASE_URL:
+    PGHOST = os.getenv("PGHOST")
+    PGPORT = os.getenv("PGPORT")
+    PGUSER = os.getenv("PGUSER")
+    PGPASSWORD = os.getenv("PGPASSWORD")
+    PGDATABASE = os.getenv("PGDATABASE")
+
+    if all([PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE]):
+        DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
+
 ADMINS = [6101127840, 8189353497]
 
 START_BALANCE = 1000
@@ -33,11 +48,23 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+print("BOT_TOKEN bulundu mu:", bool(TOKEN))
+print("DATABASE_URL bulundu mu:", bool(os.getenv("DATABASE_URL")))
+print("DATABASE_PUBLIC_URL bulundu mu:", bool(os.getenv("DATABASE_PUBLIC_URL")))
+print("PGHOST bulundu mu:", bool(os.getenv("PGHOST")))
+print("PGPORT bulundu mu:", bool(os.getenv("PGPORT")))
+print("PGUSER bulundu mu:", bool(os.getenv("PGUSER")))
+print("PGPASSWORD bulundu mu:", bool(os.getenv("PGPASSWORD")))
+print("PGDATABASE bulundu mu:", bool(os.getenv("PGDATABASE")))
+print("Bağlantı URL üretildi mi:", bool(DATABASE_URL))
+
 if not TOKEN:
     raise ValueError("BOT_TOKEN bulunamadı.")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL bulunamadı.")
+    raise ValueError(
+        "DATABASE_URL bulunamadı. Railway bot service variables içine DATABASE_URL / DATABASE_PUBLIC_URL veya PGHOST-PGPORT-PGUSER-PGPASSWORD-PGDATABASE gelmiyor."
+    )
 
 # =========================
 # DATABASE
