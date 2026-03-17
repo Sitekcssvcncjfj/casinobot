@@ -21,7 +21,10 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 ADMINS = [6101127840, 8189353497]
 DB_NAME = "casino.db"
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))  # yoksa 0
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
+
+SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/")
+ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.me/")
 
 START_BALANCE = 1000
 DAILY_REWARD = 500
@@ -29,7 +32,7 @@ WEEKLY_REWARD = 2000
 VIP_THRESHOLD = 50000
 VIP_DAILY_BONUS = 1000
 VIP_DURATION_DAYS = 7
-BANK_INTEREST_RATE = 0.03   # %3
+BANK_INTEREST_RATE = 0.03
 XP_PER_GAME = 10
 XP_PER_WIN = 25
 
@@ -324,26 +327,16 @@ def global_stats():
     return users, money, logs
 
 def add_item(user_id, item_name, qty=1):
-    cursor.execute("""
-        SELECT quantity FROM inventory WHERE user_id=? AND item_name=?
-    """, (user_id, item_name))
+    cursor.execute("SELECT quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
     row = cursor.fetchone()
     if row:
-        cursor.execute("""
-            UPDATE inventory SET quantity = quantity + ?
-            WHERE user_id=? AND item_name=?
-        """, (qty, user_id, item_name))
+        cursor.execute("UPDATE inventory SET quantity = quantity + ? WHERE user_id=? AND item_name=?", (qty, user_id, item_name))
     else:
-        cursor.execute("""
-            INSERT INTO inventory (user_id, item_name, quantity)
-            VALUES (?, ?, ?)
-        """, (user_id, item_name, qty))
+        cursor.execute("INSERT INTO inventory (user_id, item_name, quantity) VALUES (?, ?, ?)", (user_id, item_name, qty))
     conn.commit()
 
 def remove_item(user_id, item_name, qty=1):
-    cursor.execute("""
-        SELECT quantity FROM inventory WHERE user_id=? AND item_name=?
-    """, (user_id, item_name))
+    cursor.execute("SELECT quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
     row = cursor.fetchone()
     if not row:
         return False
@@ -354,51 +347,32 @@ def remove_item(user_id, item_name, qty=1):
     if new_qty == 0:
         cursor.execute("DELETE FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
     else:
-        cursor.execute("""
-            UPDATE inventory SET quantity=?
-            WHERE user_id=? AND item_name=?
-        """, (new_qty, user_id, item_name))
+        cursor.execute("UPDATE inventory SET quantity=? WHERE user_id=? AND item_name=?", (new_qty, user_id, item_name))
     conn.commit()
     return True
 
 def has_item(user_id, item_name):
-    cursor.execute("""
-        SELECT quantity FROM inventory WHERE user_id=? AND item_name=?
-    """, (user_id, item_name))
+    cursor.execute("SELECT quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
     row = cursor.fetchone()
     return row is not None and row[0] > 0
 
 def get_inventory(user_id):
-    cursor.execute("""
-        SELECT item_name, quantity FROM inventory
-        WHERE user_id=?
-        ORDER BY item_name ASC
-    """, (user_id,))
+    cursor.execute("SELECT item_name, quantity FROM inventory WHERE user_id=? ORDER BY item_name ASC", (user_id,))
     return cursor.fetchall()
 
 def has_achievement(user_id, name):
-    cursor.execute("""
-        SELECT id FROM achievements WHERE user_id=? AND achievement_name=?
-    """, (user_id, name))
+    cursor.execute("SELECT id FROM achievements WHERE user_id=? AND achievement_name=?", (user_id, name))
     return cursor.fetchone() is not None
 
 def unlock_achievement(user_id, name):
     if has_achievement(user_id, name):
         return False
-    cursor.execute("""
-        INSERT INTO achievements (user_id, achievement_name, unlocked_at)
-        VALUES (?, ?, ?)
-    """, (user_id, name, now_iso()))
+    cursor.execute("INSERT INTO achievements (user_id, achievement_name, unlocked_at) VALUES (?, ?, ?)", (user_id, name, now_iso()))
     conn.commit()
     return True
 
 def get_achievements(user_id):
-    cursor.execute("""
-        SELECT achievement_name, unlocked_at
-        FROM achievements
-        WHERE user_id=?
-        ORDER BY id DESC
-    """, (user_id,))
+    cursor.execute("SELECT achievement_name, unlocked_at FROM achievements WHERE user_id=? ORDER BY id DESC", (user_id,))
     return cursor.fetchall()
 
 def update_missions_played(user_id):
@@ -418,20 +392,11 @@ def update_missions_won(user_id):
     conn.commit()
 
 def get_missions(user_id):
-    cursor.execute("""
-        SELECT id, mission_name, progress, target, reward, claimed
-        FROM missions
-        WHERE user_id=?
-        ORDER BY id ASC
-    """, (user_id,))
+    cursor.execute("SELECT id, mission_name, progress, target, reward, claimed FROM missions WHERE user_id=? ORDER BY id ASC", (user_id,))
     return cursor.fetchall()
 
 def claim_mission(user_id, mission_id):
-    cursor.execute("""
-        SELECT progress, target, reward, claimed
-        FROM missions
-        WHERE id=? AND user_id=?
-    """, (mission_id, user_id))
+    cursor.execute("SELECT progress, target, reward, claimed FROM missions WHERE id=? AND user_id=?", (mission_id, user_id))
     row = cursor.fetchone()
     if not row:
         return False, "Görev bulunamadı.", 0
@@ -488,7 +453,8 @@ def get_streak_info(user_id):
 def update_streak_on_daily(user_id):
     streak, last_claim = get_streak_info(user_id)
     today = now().date()
-    last_dt = parse_time(last_claim).date() if last_claim and parse_time(last_claim) else None
+    parsed = parse_time(last_claim) if last_claim else None
+    last_dt = parsed.date() if parsed else None
 
     if last_dt is None:
         streak = 1
@@ -501,9 +467,7 @@ def update_streak_on_daily(user_id):
         else:
             streak = 1
 
-    cursor.execute("""
-        UPDATE users SET daily_streak=?, last_streak_claim=? WHERE user_id=?
-    """, (streak, now_iso(), user_id))
+    cursor.execute("UPDATE users SET daily_streak=?, last_streak_claim=? WHERE user_id=?", (streak, now_iso(), user_id))
     conn.commit()
     return streak
 
@@ -527,8 +491,16 @@ def reset_user(user_id):
 # =========================
 # KEYBOARDS
 # =========================
+def external_buttons():
+    return [
+        [
+            InlineKeyboardButton("📞 Destek", url=SUPPORT_URL),
+            InlineKeyboardButton("➕ Beni Gruba Ekle", url=ADD_GROUP_URL),
+        ]
+    ]
+
 def nav_main():
-    return InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton("🏠 Ana Menü", callback_data="back_main"),
             InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
@@ -536,11 +508,13 @@ def nav_main():
         [
             InlineKeyboardButton("📊 Profil", callback_data="menu_profile"),
             InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"),
-        ]
-    ])
+        ],
+    ]
+    rows.extend(external_buttons())
+    return InlineKeyboardMarkup(rows)
 
 def main_menu():
-    return InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"),
             InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
@@ -564,11 +538,13 @@ def main_menu():
         [
             InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"),
             InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help"),
-        ]
-    ])
+        ],
+    ]
+    rows.extend(external_buttons())
+    return InlineKeyboardMarkup(rows)
 
 def games_menu():
-    return InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton("🎡 Rulet", callback_data="info_rulet"),
             InlineKeyboardButton("🃏 Blackjack", callback_data="info_blackjack"),
@@ -595,8 +571,10 @@ def games_menu():
         ],
         [
             InlineKeyboardButton("⬅️ Ana Menü", callback_data="back_main")
-        ]
-    ])
+        ],
+    ]
+    rows.extend(external_buttons())
+    return InlineKeyboardMarkup(rows)
 
 # =========================
 # UI HELPERS
@@ -619,7 +597,7 @@ async def send_log(context: ContextTypes.DEFAULT_TYPE, text: str):
         try:
             await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML")
         except Exception as e:
-            logging.warning("Log channel message failed: %s", e)
+            logging.warning("Log channel failed: %s", e)
 
 def start_text(name):
     return (
@@ -654,7 +632,7 @@ def home_panel(row, user_id):
     )
 
 # =========================
-# GAME SYSTEM
+# GAME / VIP / ACH
 # =========================
 MARKET_ITEMS = {
     "vip_ticket": {"name": "VIP Bilet", "price": 5000},
@@ -671,7 +649,6 @@ def check_achievements(user_id):
     games_won = row[9]
     level = row[5]
     streak = row[13]
-
     if games_played >= 1:
         unlock_achievement(user_id, "İlk Oyun")
     if games_won >= 10:
@@ -709,7 +686,6 @@ def process_game_result(user_id, game_name, bet, outcome, profit=0):
         leveled_up, level, xp = result
         if leveled_up:
             levelup_text = f"\n\n🎉 <b>Level atladın!</b> Yeni level: <b>{level}</b>"
-
     check_achievements(user_id)
     return levelup_text
 
@@ -860,7 +836,6 @@ async def gunluk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
     row = get_user_row(user.id)
-
     remain = daily_remaining(row[10])
     if remain:
         await update.message.reply_text(f"⏳ Günlük ödül hazır değil: <b>{format_timedelta(remain)}</b>", parse_mode="HTML")
@@ -890,12 +865,10 @@ async def haftalik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
     row = get_user_row(user.id)
-
     remain = weekly_remaining(row[11])
     if remain:
         await update.message.reply_text(f"⏳ Haftalık ödül hazır değil: <b>{format_timedelta(remain)}</b>", parse_mode="HTML")
         return
-
     update_balance(user.id, WEEKLY_REWARD)
     set_weekly(user.id)
     await update.message.reply_text(f"🎁 <b>Haftalık ödül alındı!</b>\n+{format_number(WEEKLY_REWARD)} 🪙", parse_mode="HTML")
@@ -904,30 +877,23 @@ async def haftalik(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def faiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-
     last_interest = get_last_interest(user.id)
     remain = interest_remaining(last_interest)
     if remain:
         await update.message.reply_text(f"⏳ Faiz almak için bekle: <b>{format_timedelta(remain)}</b>", parse_mode="HTML")
         return
-
     bank_balance = get_bank(user.id)
     if bank_balance <= 0:
         await update.message.reply_text("❌ Bankada para yok.")
         return
-
     interest = int(bank_balance * BANK_INTEREST_RATE)
     if interest <= 0:
         await update.message.reply_text("❌ Faiz hesaplanamadı.")
         return
-
     update_bank(user.id, interest)
     set_last_interest(user.id)
-
     await update.message.reply_text(
-        f"🏦 <b>Faiz alındı!</b>\n"
-        f"Oran: <b>%{int(BANK_INTEREST_RATE*100)}</b>\n"
-        f"Kazanç: <b>+{format_number(interest)} 🪙</b>",
+        f"🏦 <b>Faiz alındı!</b>\nOran: <b>%{int(BANK_INTEREST_RATE*100)}</b>\nKazanç: <b>+{format_number(interest)} 🪙</b>",
         parse_mode="HTML"
     )
     await send_log(context, f"🏦 <b>Faiz</b>\n👤 {get_display_name(user)}\n💰 +{format_number(interest)} 🪙")
@@ -936,8 +902,7 @@ async def bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
     await update.message.reply_text(
-        f"🏦 <b>Banka:</b> {format_number(get_bank(user.id))} 🪙\n"
-        f"💸 Faiz için: /faiz",
+        f"🏦 <b>Banka:</b> {format_number(get_bank(user.id))} 🪙\n💸 Faiz için: /faiz",
         parse_mode="HTML"
     )
 
@@ -990,7 +955,6 @@ async def gonder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sender.id == receiver.id:
         await update.message.reply_text("❌ Kendine para gönderemezsin.")
         return
-
     get_user(sender.id, get_display_name(sender))
     get_user(receiver.id, get_display_name(receiver))
     try:
@@ -1004,7 +968,6 @@ async def gonder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if get_balance(sender.id) < amount:
         await update.message.reply_text("❌ Yetersiz bakiye.")
         return
-
     ok1 = update_balance(sender.id, -amount)
     ok2 = update_balance(receiver.id, amount)
     if ok1 and ok2:
@@ -1598,21 +1561,11 @@ async def backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = {}
-
-    cursor.execute("SELECT * FROM users")
-    data["users"] = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM inventory")
-    data["inventory"] = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM achievements")
-    data["achievements"] = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM missions")
-    data["missions"] = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM game_logs")
-    data["game_logs"] = cursor.fetchall()
+    cursor.execute("SELECT * FROM users"); data["users"] = cursor.fetchall()
+    cursor.execute("SELECT * FROM inventory"); data["inventory"] = cursor.fetchall()
+    cursor.execute("SELECT * FROM achievements"); data["achievements"] = cursor.fetchall()
+    cursor.execute("SELECT * FROM missions"); data["missions"] = cursor.fetchall()
+    cursor.execute("SELECT * FROM game_logs"); data["game_logs"] = cursor.fetchall()
 
     filename = f"backup_{int(datetime.utcnow().timestamp())}.json"
     with open(filename, "w", encoding="utf-8") as f:
@@ -1627,7 +1580,6 @@ async def backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user = query.from_user
     get_user(user.id, get_display_name(user))
     row = get_user_row(user.id)
@@ -1660,7 +1612,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         streak = row[13]
         winrate = round((games_won / games_played) * 100, 1) if games_played else 0
         vip_tag = "💎 VIP Aktif\n" if is_vip(user.id) else ""
-
         text = (
             "╔══════════════════════╗\n"
             "       📊 <b>PROFİL KARTI</b>\n"
@@ -1908,7 +1859,7 @@ def main():
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_error_handler(error_handler)
 
-    print("🤖 Casino Bot V5 çalışıyor...")
+    print("🤖 Casino Bot V5 + Destek/Grup butonları çalışıyor...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
