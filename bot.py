@@ -21,10 +21,15 @@ from telegram.ext import (
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
 ADMINS = [6101127840, 8189353497]
-DB_NAME = "/app/data/casino.db"
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/")
 ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.me/")
+
+# --- KALICI VERİTABANI İÇİN ---
+DB_DIR = os.getenv("DB_DIR", ".")
+os.makedirs(DB_DIR, exist_ok=True)
+DB_NAME = os.path.join(DB_DIR, "casino.db")
+# -----------------------------
 
 START_BALANCE = 1000
 DAILY_REWARD = 500
@@ -46,6 +51,11 @@ if not TOKEN:
 # =========================
 # DATABASE
 # =========================
+print("--- VERİTABANI YOLU KONTROL ---")
+print("DB_DIR:", DB_DIR)
+print("DB_NAME:", DB_NAME)
+print("----------------------------")
+
 conn = sqlite3.connect(DB_NAME, check_same_thread=False)
 cursor = conn.cursor()
 
