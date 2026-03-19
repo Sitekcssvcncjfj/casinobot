@@ -4,7 +4,6 @@ import sqlite3
 import logging
 import asyncio
 import json
-import time
 from io import BytesIO
 from datetime import datetime, timedelta
 
@@ -39,6 +38,11 @@ VIP_DURATION_DAYS = 7
 BANK_INTEREST_RATE = 0.03
 XP_PER_GAME = 10
 XP_PER_WIN = 25
+
+MARKET_ITEMS = {
+    "vip_ticket": {"name": "VIP Bilet", "price": 25000},
+    "lucky_box": {"name": "Şans Kutusu", "price": 5000},
+}
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -149,7 +153,7 @@ def init_db():
 # HELPERS
 # =========================
 def format_number(n):
-    return f"{n:,}".replace(",", ".")
+    return f"{int(n):,}".replace(",", ".")
 
 
 def format_timedelta(td):
@@ -190,6 +194,131 @@ def is_group_chat(update: Update) -> bool:
 
 def short_result_prefix(update: Update):
     return "👥 Grup Modu\n" if is_group_chat(update) else ""
+
+
+def start_text(name):
+    return (
+        "╔══════════════════════╗\n"
+        "      🎰 <b>CASINO BOTA HOŞ GELDİN</b>\n"
+        "╚══════════════════════╝\n\n"
+        f"👋 Merhaba <b>{name}</b>\n\n"
+        "Bu botta oyun oynayabilir, banka kullanabilir,\n"
+        "ödüller toplayabilir ve profilini geliştirebilirsin.\n\n"
+        "Aşağıdaki menüden devam et."
+    )
+
+
+def home_panel(row, user_id):
+    if not row:
+        return "❌ Profil verisi bulunamadı."
+
+    cash = row[2]
+    bankv = row[3]
+    total = cash + bankv
+    vip_tag = "💎 <b>VIP Aktif</b>\n" if is_vip(user_id) else ""
+
+    return (
+        "╔══════════════════════╗\n"
+        "        🏠 <b>ANA PANEL</b>\n"
+        "╚══════════════════════╝\n\n"
+        f"{vip_tag}"
+        f"👛 Cüzdan: <b>{format_number(cash)} 🪙</b>\n"
+        f"🏦 Banka: <b>{format_number(bankv)} 🪙</b>\n"
+        f"📦 Toplam: <b>{format_number(total)} 🪙</b>\n\n"
+        "Aşağıdaki butonlardan işlem seç."
+    )
+
+
+def main_menu():
+    keyboard = [
+        [
+            InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"),
+            InlineKeyboardButton("📊 Profil", callback_data="menu_profile"),
+        ],
+        [
+            InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
+            InlineKeyboardButton("🏦 Banka", callback_data="menu_bank"),
+        ],
+        [
+            InlineKeyboardButton("💎 VIP", callback_data="menu_vip"),
+            InlineKeyboardButton("🎁 Ödüller", callback_data="menu_rewards"),
+        ],
+        [
+            InlineKeyboardButton("🛒 Market", callback_data="menu_market"),
+            InlineKeyboardButton("🎒 Envanter", callback_data="menu_inventory"),
+        ],
+        [
+            InlineKeyboardButton("📜 Görevler", callback_data="menu_missions"),
+            InlineKeyboardButton("🏅 Başarımlar", callback_data="menu_achievements"),
+        ],
+        [
+            InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"),
+            InlineKeyboardButton("🎨 Kartım", callback_data="menu_mycard"),
+        ],
+        [
+            InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def nav_main():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏠 Ana Menü", callback_data="back_main")]
+    ])
+
+
+def games_menu():
+    keyboard = [
+        [
+            InlineKeyboardButton("🎡 Rulet", callback_data="info_rulet"),
+            InlineKeyboardButton("🃏 Blackjack", callback_data="info_blackjack"),
+        ],
+        [
+            InlineKeyboardButton("♠️ Poker", callback_data="info_poker"),
+            InlineKeyboardButton("🎰 Slot", callback_data="info_slot"),
+        ],
+        [
+            InlineKeyboardButton("🎲 Zar", callback_data="info_zar"),
+            InlineKeyboardButton("🏀 Basket", callback_data="info_basket"),
+        ],
+        [
+            InlineKeyboardButton("🪙 Coinflip", callback_data="info_coinflip"),
+            InlineKeyboardButton("🔢 Guess", callback_data="info_guess"),
+        ],
+        [
+            InlineKeyboardButton("📈 HighLow", callback_data="info_highlow"),
+            InlineKeyboardButton("🚀 Crash", callback_data="info_crash"),
+        ],
+        [
+            InlineKeyboardButton("💣 Mines", callback_data="info_mines"),
+            InlineKeyboardButton("⚔️ Duel", callback_data="info_duel"),
+        ],
+        [InlineKeyboardButton("⬅️ Geri", callback_data="back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def safe_edit(message, text, reply_markup=None, min_interval=0):
+    if min_interval > 0:
+        await asyncio.sleep(min_interval)
+    try:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            return
+        raise
+
+
+async def animated_panel(message, frames, delay=0.8, fast_mode=False):
+    actual_delay = 0.35 if fast_mode else delay
+    for i, frame in enumerate(frames):
+        if i != 0:
+            await asyncio.sleep(actual_delay)
+        try:
+            await safe_edit(message, frame)
+        except Exception:
+            pass
 
 
 # =========================
@@ -531,6 +660,7 @@ def reset_user(user_id):
     cursor.execute("DELETE FROM game_logs WHERE user_id=?", (user_id,))
     conn.commit()
 
+
 # =========================
 # GROUP LEADERBOARD
 # =========================
@@ -565,6 +695,7 @@ def get_global_rank(user_id):
     cursor.execute("SELECT user_id FROM users ORDER BY (sikke + bank) DESC")
     rows = [r[0] for r in cursor.fetchall()]
     return rows.index(user_id) + 1 if user_id in rows else 0
+
 
 # =========================
 # PROFILE CARD
@@ -664,119 +795,10 @@ def generate_profile_card(user_id):
     bio.seek(0)
     return bio
 
+
 # =========================
-# UI / MENUS / MISSING FIXES
+# ACHIEVEMENTS / GAME RESULT
 # =========================
-MARKET_ITEMS = {
-    "vip_ticket": {"name": "VIP Bilet", "price": 25000},
-    "lucky_box": {"name": "Şans Kutusu", "price": 5000},
-}
-
-def start_text(name):
-    return (
-        "╔══════════════════════╗\n"
-        "      🎰 <b>CASINO BOTA HOŞ GELDİN</b>\n"
-        "╚══════════════════════╝\n\n"
-        f"👋 Merhaba <b>{name}</b>\n\n"
-        "Bu botta oyun oynayabilir, ödül toplayabilir,\n"
-        "profilini geliştirebilir ve marketi kullanabilirsin.\n\n"
-        "Aşağıdaki menüden devam et."
-    )
-
-def home_panel(row, user_id):
-    if not row:
-        return "❌ Profil verisi bulunamadı."
-    cash = row[2]
-    bankv = row[3]
-    total = cash + bankv
-    vip_tag = "💎 <b>VIP Aktif</b>\n" if is_vip(user_id) else ""
-    return (
-        "╔══════════════════════╗\n"
-        "        🏠 <b>ANA PANEL</b>\n"
-        "╚══════════════════════╝\n\n"
-        f"{vip_tag}"
-        f"👛 Cüzdan: <b>{format_number(cash)} 🪙</b>\n"
-        f"🏦 Banka: <b>{format_number(bankv)} 🪙</b>\n"
-        f"📦 Toplam: <b>{format_number(total)} 🪙</b>\n\n"
-        "Aşağıdan bir seçenek seç."
-    )
-
-def main_menu():
-    keyboard = [
-        [
-            InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"),
-            InlineKeyboardButton("📊 Profil", callback_data="menu_profile"),
-        ],
-        [
-            InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
-            InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"),
-        ],
-        [
-            InlineKeyboardButton("🎨 Kartım", callback_data="menu_mycard"),
-            InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help"),
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def nav_main():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏠 Ana Menü", callback_data="back_main")]
-    ])
-
-def games_menu():
-    keyboard = [
-        [
-            InlineKeyboardButton("🎡 Rulet", callback_data="info_rulet"),
-            InlineKeyboardButton("🃏 Blackjack", callback_data="info_blackjack"),
-        ],
-        [
-            InlineKeyboardButton("♠️ Poker", callback_data="info_poker"),
-            InlineKeyboardButton("🎰 Slot", callback_data="info_slot"),
-        ],
-        [
-            InlineKeyboardButton("🎲 Zar", callback_data="info_zar"),
-            InlineKeyboardButton("🏀 Basket", callback_data="info_basket"),
-        ],
-        [
-            InlineKeyboardButton("🪙 Coinflip", callback_data="info_coinflip"),
-            InlineKeyboardButton("🔢 Guess", callback_data="info_guess"),
-        ],
-        [
-            InlineKeyboardButton("📈 HighLow", callback_data="info_highlow"),
-            InlineKeyboardButton("🚀 Crash", callback_data="info_crash"),
-        ],
-        [
-            InlineKeyboardButton("💣 Mines", callback_data="info_mines"),
-            InlineKeyboardButton("⚔️ Duel", callback_data="info_duel"),
-        ],
-        [InlineKeyboardButton("⬅️ Geri", callback_data="back_main")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-async def safe_edit(message, text, reply_markup=None, min_interval=0):
-    if min_interval > 0:
-        await asyncio.sleep(min_interval)
-    try:
-        await message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
-    except BadRequest as e:
-        if "Message is not modified" in str(e):
-            return
-        raise
-
-async def animated_panel(message, frames, delay=0.8, fast_mode=False):
-    actual_delay = 0.35 if fast_mode else delay
-    first = True
-    for frame in frames:
-        try:
-            if first:
-                await safe_edit(message, frame)
-                first = False
-            else:
-                await asyncio.sleep(actual_delay)
-                await safe_edit(message, frame)
-        except Exception:
-            pass
-
 def check_achievements(user_id):
     row = get_user_row(user_id)
     if not row:
@@ -797,6 +819,7 @@ def check_achievements(user_id):
         unlock_achievement(user_id, "Seviye 10")
     if is_vip(user_id):
         unlock_achievement(user_id, "VIP Oyuncu")
+
 
 def process_game_result(user_id, game_name, bet, result, profit=0):
     level_up_text = ""
@@ -826,6 +849,7 @@ def process_game_result(user_id, game_name, bet, result, profit=0):
         level_up_text = f"\n\n🎉 <b>Level atladın!</b> Yeni seviye: <b>{level_info[1]}</b>"
 
     return level_up_text
+
 
 # =========================
 # COMMANDS
@@ -1973,12 +1997,119 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "menu_games":
-        await safe_edit(
-            query.message,
-            "╔══════════════════════╗\n      🎮 <b>OYUN SALONU</b>\n╚══════════════════════╝\n\nŞansını denemek istediğin oyunu seç.",
-            games_menu(),
-            min_interval=0.8
+        await safe_edit(query.message,
+                        "╔══════════════════════╗\n      🎮 <b>OYUN SALONU</b>\n╚══════════════════════╝\n\nŞansını denemek istediğin oyunu seç.",
+                        games_menu(),
+                        min_interval=0.8)
+        return
+
+    if data == "menu_bank":
+        text = (
+            "╔══════════════════════╗\n"
+            "        🏦 <b>BANKA PANELİ</b>\n"
+            "╚══════════════════════╝\n\n"
+            f"🏦 Banka Bakiyesi: <b>{format_number(row[3])} 🪙</b>\n\n"
+            "Komutlar:\n"
+            "• /bank\n"
+            "• /deposit [miktar]\n"
+            "• /withdraw [miktar]\n"
+            "• /faiz"
         )
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
+        return
+
+    if data == "menu_vip":
+        remain = vip_remaining(user.id)
+        if remain:
+            text = (
+                "╔══════════════════════╗\n"
+                "        💎 <b>VIP PANEL</b>\n"
+                "╚══════════════════════╝\n\n"
+                "Durum: <b>Aktif ✅</b>\n"
+                f"Kalan Süre: <b>{format_timedelta(remain)}</b>\n"
+                f"Günlük VIP bonus: <b>{format_number(VIP_DAILY_BONUS)} 🪙</b>\n\n"
+                "VIP bileti kullanmak için:\n"
+                "• /use vip_ticket"
+            )
+        else:
+            text = (
+                "╔══════════════════════╗\n"
+                "        💎 <b>VIP PANEL</b>\n"
+                "╚══════════════════════╝\n\n"
+                "Durum: <b>Pasif ❌</b>\n"
+                f"VIP süresi: <b>{VIP_DURATION_DAYS} gün</b>\n"
+                f"Günlük VIP bonus: <b>{format_number(VIP_DAILY_BONUS)} 🪙</b>\n\n"
+                "VIP için:\n"
+                "• /buy vip_ticket\n"
+                "• /use vip_ticket"
+            )
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
+        return
+
+    if data == "menu_rewards":
+        daily_remain = daily_remaining(row[10])
+        weekly_remain = weekly_remaining(row[11])
+
+        daily_text = f"⏳ {format_timedelta(daily_remain)}" if daily_remain else "✅ Hazır (/gunluk)"
+        weekly_text = f"⏳ {format_timedelta(weekly_remain)}" if weekly_remain else "✅ Hazır (/haftalik)"
+
+        text = (
+            "╔══════════════════════╗\n"
+            "       🎁 <b>ÖDÜL PANELİ</b>\n"
+            "╚══════════════════════╝\n\n"
+            f"🎁 Günlük: {daily_text}\n"
+            f"📦 Haftalık: {weekly_text}\n"
+            f"🔥 Streak: <b>{row[13]}</b>\n\n"
+            "Komutlar:\n"
+            "• /gunluk\n"
+            "• /haftalik"
+        )
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
+        return
+
+    if data == "menu_market":
+        text = "╔══════════════════════╗\n      🛒 <b>PREMIUM MARKET</b>\n╚══════════════════════╝\n\n"
+        for code, item in MARKET_ITEMS.items():
+            text += f"🎟 <b>{item['name']}</b>\n💰 Fiyat: <b>{format_number(item['price'])} 🪙</b>\n🧾 Kod: <code>{code}</code>\n\n"
+        text += "Satın almak için:\n• /buy [item_kodu]"
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
+        return
+
+    if data == "menu_inventory":
+        items = get_inventory(user.id)
+        if not items:
+            text = "🎒 Envanterin boş."
+        else:
+            text = "╔══════════════════════╗\n      🎒 <b>PREMIUM ENVANTER</b>\n╚══════════════════════╝\n\n"
+            for name, qty in items:
+                text += f"• <b>{name}</b> × {qty}\n"
+            text += "\nKullanım:\n• /use [item_adi]"
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
+        return
+
+    if data == "menu_missions":
+        data_m = get_missions(user.id)
+        text = "╔══════════════════════╗\n      📜 <b>GÖREV PANOSU</b>\n╚══════════════════════╝\n\n"
+        for m in data_m:
+            mission_id, name, progress, target, reward, claimed = m
+            status = "✅ Alındı" if claimed else ("🎯 Hazır" if progress >= target else "⏳ Devam")
+            percent = int((progress / target) * 100) if target > 0 else 0
+            if percent > 100:
+                percent = 100
+            text += f"🆔 <code>{mission_id}</code>\n<b>{name}</b>\nİlerleme: {progress}/{target} (%{percent})\nÖdül: {format_number(reward)} 🪙\nDurum: {status}\n\n"
+        text += "Ödül almak için:\n• /claim [görev_id]"
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
+        return
+
+    if data == "menu_achievements":
+        achs = get_achievements(user.id)
+        if not achs:
+            text = "🏅 Henüz başarımın yok."
+        else:
+            text = "╔══════════════════════╗\n      🏅 <b>BAŞARIM GALERİSİ</b>\n╚══════════════════════╝\n\n"
+            for name, unlocked_at in achs:
+                text += f"🏅 {name}\n"
+        await safe_edit(query.message, text, main_menu(), min_interval=0.8)
         return
 
     if data == "menu_top":
@@ -2025,6 +2156,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         games_menu(),
                         min_interval=0.8)
         return
+
 
 # =========================
 # ERROR / MAIN
