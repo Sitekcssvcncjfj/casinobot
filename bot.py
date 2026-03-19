@@ -13,8 +13,7 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes,
-    AIORateLimiter,
+    ContextTypes
 )
 
 # =========================
@@ -695,12 +694,10 @@ def process_game_result(user_id, game_name, bet, outcome, profit=0):
         log_game(user_id, game_name, bet, "win", profit)
         update_missions_won(user_id)
         xp_gain += XP_PER_WIN
-
     elif outcome == "lose":
         update_balance(user_id, -bet)
         add_stats(user_id, lost=bet, played=1, games_won=0)
         log_game(user_id, game_name, bet, "lose", -bet)
-
     else:
         add_stats(user_id, played=1, games_won=0)
         log_game(user_id, game_name, bet, "draw", 0)
@@ -2066,13 +2063,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_db()
-
-    app = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .rate_limiter(AIORateLimiter())
-        .build()
-    )
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
