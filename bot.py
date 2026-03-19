@@ -665,12 +665,181 @@ def generate_profile_card(user_id):
     return bio
 
 # =========================
+# UI / MENUS / MISSING FIXES
+# =========================
+MARKET_ITEMS = {
+    "vip_ticket": {"name": "VIP Bilet", "price": 25000},
+    "lucky_box": {"name": "Şans Kutusu", "price": 5000},
+}
+
+def start_text(name):
+    return (
+        "╔══════════════════════╗\n"
+        "      🎰 <b>CASINO BOTA HOŞ GELDİN</b>\n"
+        "╚══════════════════════╝\n\n"
+        f"👋 Merhaba <b>{name}</b>\n\n"
+        "Bu botta oyun oynayabilir, ödül toplayabilir,\n"
+        "profilini geliştirebilir ve marketi kullanabilirsin.\n\n"
+        "Aşağıdaki menüden devam et."
+    )
+
+def home_panel(row, user_id):
+    if not row:
+        return "❌ Profil verisi bulunamadı."
+    cash = row[2]
+    bankv = row[3]
+    total = cash + bankv
+    vip_tag = "💎 <b>VIP Aktif</b>\n" if is_vip(user_id) else ""
+    return (
+        "╔══════════════════════╗\n"
+        "        🏠 <b>ANA PANEL</b>\n"
+        "╚══════════════════════╝\n\n"
+        f"{vip_tag}"
+        f"👛 Cüzdan: <b>{format_number(cash)} 🪙</b>\n"
+        f"🏦 Banka: <b>{format_number(bankv)} 🪙</b>\n"
+        f"📦 Toplam: <b>{format_number(total)} 🪙</b>\n\n"
+        "Aşağıdan bir seçenek seç."
+    )
+
+def main_menu():
+    keyboard = [
+        [
+            InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"),
+            InlineKeyboardButton("📊 Profil", callback_data="menu_profile"),
+        ],
+        [
+            InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games"),
+            InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"),
+        ],
+        [
+            InlineKeyboardButton("🎨 Kartım", callback_data="menu_mycard"),
+            InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def nav_main():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏠 Ana Menü", callback_data="back_main")]
+    ])
+
+def games_menu():
+    keyboard = [
+        [
+            InlineKeyboardButton("🎡 Rulet", callback_data="info_rulet"),
+            InlineKeyboardButton("🃏 Blackjack", callback_data="info_blackjack"),
+        ],
+        [
+            InlineKeyboardButton("♠️ Poker", callback_data="info_poker"),
+            InlineKeyboardButton("🎰 Slot", callback_data="info_slot"),
+        ],
+        [
+            InlineKeyboardButton("🎲 Zar", callback_data="info_zar"),
+            InlineKeyboardButton("🏀 Basket", callback_data="info_basket"),
+        ],
+        [
+            InlineKeyboardButton("🪙 Coinflip", callback_data="info_coinflip"),
+            InlineKeyboardButton("🔢 Guess", callback_data="info_guess"),
+        ],
+        [
+            InlineKeyboardButton("📈 HighLow", callback_data="info_highlow"),
+            InlineKeyboardButton("🚀 Crash", callback_data="info_crash"),
+        ],
+        [
+            InlineKeyboardButton("💣 Mines", callback_data="info_mines"),
+            InlineKeyboardButton("⚔️ Duel", callback_data="info_duel"),
+        ],
+        [InlineKeyboardButton("⬅️ Geri", callback_data="back_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+async def safe_edit(message, text, reply_markup=None, min_interval=0):
+    if min_interval > 0:
+        await asyncio.sleep(min_interval)
+    try:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            return
+        raise
+
+async def animated_panel(message, frames, delay=0.8, fast_mode=False):
+    actual_delay = 0.35 if fast_mode else delay
+    first = True
+    for frame in frames:
+        try:
+            if first:
+                await safe_edit(message, frame)
+                first = False
+            else:
+                await asyncio.sleep(actual_delay)
+                await safe_edit(message, frame)
+        except Exception:
+            pass
+
+def check_achievements(user_id):
+    row = get_user_row(user_id)
+    if not row:
+        return
+
+    total_won = row[6]
+    games_played = row[8]
+    games_won = row[9]
+    level = row[5]
+
+    if games_played >= 1:
+        unlock_achievement(user_id, "İlk Oyun")
+    if games_won >= 1:
+        unlock_achievement(user_id, "İlk Galibiyet")
+    if total_won >= 10000:
+        unlock_achievement(user_id, "10K Kazanç")
+    if level >= 10:
+        unlock_achievement(user_id, "Seviye 10")
+    if is_vip(user_id):
+        unlock_achievement(user_id, "VIP Oyuncu")
+
+def process_game_result(user_id, game_name, bet, result, profit=0):
+    level_up_text = ""
+
+    if result == "win":
+        update_balance(user_id, profit)
+        add_stats(user_id, won=profit, played=1, games_won=1)
+        level_info = add_xp(user_id, XP_PER_GAME + XP_PER_WIN)
+        log_game(user_id, game_name, bet, "win", profit)
+        update_missions_played(user_id)
+        update_missions_won(user_id)
+    elif result == "lose":
+        update_balance(user_id, -bet)
+        add_stats(user_id, lost=bet, played=1, games_won=0)
+        level_info = add_xp(user_id, XP_PER_GAME)
+        log_game(user_id, game_name, bet, "lose", -bet)
+        update_missions_played(user_id)
+    else:
+        add_stats(user_id, played=1, games_won=0)
+        level_info = add_xp(user_id, XP_PER_GAME)
+        log_game(user_id, game_name, bet, "draw", 0)
+        update_missions_played(user_id)
+
+    check_achievements(user_id)
+
+    if level_info and level_info[0]:
+        level_up_text = f"\n\n🎉 <b>Level atladın!</b> Yeni seviye: <b>{level_info[1]}</b>"
+
+    return level_up_text
+
+# =========================
 # COMMANDS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    if not update.message:
+        return
     get_user(user.id, get_display_name(user))
-    await update.message.reply_text(start_text(get_display_name(user)), parse_mode="HTML", reply_markup=main_menu())
+    await update.message.reply_text(
+        start_text(get_display_name(user)),
+        parse_mode="HTML",
+        reply_markup=main_menu()
+    )
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1804,10 +1973,12 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "menu_games":
-        await safe_edit(query.message,
-                        "╔══════════════════════╗\n      🎮 <b>OYUN SALONU</b>\n╚══════════════════════╝\n\nŞansını denemek istediğin oyunu seç.",
-                        games_menu(),
-                        min_interval=0.8)
+        await safe_edit(
+            query.message,
+            "╔══════════════════════╗\n      🎮 <b>OYUN SALONU</b>\n╚══════════════════════╝\n\nŞansını denemek istediğin oyunu seç.",
+            games_menu(),
+            min_interval=0.8
+        )
         return
 
     if data == "menu_top":
