@@ -29,7 +29,6 @@ ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.me/")
 START_BALANCE = 1000
 DAILY_REWARD = 500
 WEEKLY_REWARD = 2000
-VIP_THRESHOLD = 50000
 VIP_DAILY_BONUS = 1000
 VIP_DURATION_DAYS = 7
 BANK_INTEREST_RATE = 0.03
@@ -85,9 +84,11 @@ def format_timedelta(td):
     days, rem = total // 86400, total % 86400
     hours, minutes = rem // 3600, (rem % 3600) // 60
     return f"{days}g {hours}s {minutes}dk" if days > 0 else f"{hours}s {minutes}dk"
+
 def is_valid_amount(amount): return amount > 0
 def get_display_name(user): return user.first_name or user.username or str(user.id)
 def is_admin(user_id): return user_id in ADMINS
+
 def fixed_url(url):
     if not url: return "https://t.me/"
     url = url.strip()
@@ -95,6 +96,10 @@ def fixed_url(url):
     if url.startswith("http"): return url
     if url.startswith("t.me/"): return "https://" + url
     return f"https://t.me/{url}"
+
+def is_group_chat(update: Update) -> bool:
+    ct = update.effective_chat.type
+    return ct in ("group", "supergroup")
 
 # =========================
 # DB FUNCTIONS
@@ -124,19 +129,25 @@ def create_default_missions(user_id):
     cursor.execute("SELECT COUNT(*) FROM missions WHERE user_id=?", (user_id,))
     if cursor.fetchone()[0] > 0: return
     for m in [("İlk Oyunun", 0, 1, 250, 0), ("5 Oyun Oyna", 0, 5, 500, 0), ("3 Oyun Kazan", 0, 3, 750, 0)]:
-        cursor.execute("INSERT INTO missions (user_id, mission_name, progress, target, reward, claimed) VALUES (?, ?, ?, ?, ?, ?)", (user_id, *m))
+        cursor.execute(
+            "INSERT INTO missions (user_id, mission_name, progress, target, reward, claimed) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, *m)
+        )
     conn.commit()
 
 def get_user(user_id, username):
     cursor.execute("SELECT sikke FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
     if row is None:
-        cursor.execute("""INSERT INTO users (user_id, username, sikke, bank, xp, level, total_won, total_lost, games_played, games_won, last_daily, last_weekly, vip_until, daily_streak, last_streak_claim, last_interest, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, username, START_BALANCE, 0, 0, 1, 0, 0, 0, 0, None, None, None, 0, None, None, now_iso()))
+        cursor.execute("""INSERT INTO users (
+            user_id, username, sikke, bank, xp, level, total_won, total_lost, games_played, games_won,
+            last_daily, last_weekly, vip_until, daily_streak, last_streak_claim, last_interest, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, username, START_BALANCE, 0, 0, 1, 0, 0, 0, 0, None, None, None, 0, None, None, now_iso()))
         conn.commit()
         create_default_missions(user_id)
         return START_BALANCE
+
     cursor.execute("UPDATE users SET username=? WHERE user_id=?", (username, user_id))
     conn.commit()
     return row[0]
@@ -184,7 +195,10 @@ def set_bank_value(user_id, amount):
     return True
 
 def add_stats(user_id, won=0, lost=0, played=0, games_won=0):
-    cursor.execute("UPDATE users SET total_won = total_won + ?, total_lost = total_lost + ?, games_played = games_played + ?, games_won = games_won + ? WHERE user_id=?", (won, lost, played, games_won, user_id))
+    cursor.execute(
+        "UPDATE users SET total_won = total_won + ?, total_lost = total_lost + ?, games_played = games_played + ?, games_won = games_won + ? WHERE user_id=?",
+        (won, lost, played, games_won, user_id)
+    )
     conn.commit()
 
 def add_xp(user_id, amount):
@@ -203,7 +217,10 @@ def add_xp(user_id, amount):
     return leveled_up, level, xp
 
 def log_game(user_id, game_name, bet, result, amount_change):
-    cursor.execute("INSERT INTO game_logs (user_id, game_name, bet, result, amount_change, created_at) VALUES (?, ?, ?, ?, ?, ?)", (user_id, game_name, bet, result, amount_change, now_iso()))
+    cursor.execute(
+        "INSERT INTO game_logs (user_id, game_name, bet, result, amount_change, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, game_name, bet, result, amount_change, now_iso())
+    )
     conn.commit()
 
 def set_daily(user_id):
@@ -251,7 +268,8 @@ def update_streak_on_daily(user_id):
     today = now().date()
     parsed = parse_time(last_claim) if last_claim else None
     last_dt = parsed.date() if parsed else None
-    if last_dt is None: streak = 1
+    if last_dt is None:
+        streak = 1
     else:
         diff = (today - last_dt).days
         if diff == 1: streak += 1
@@ -273,8 +291,10 @@ def set_last_interest(user_id):
 def add_item(user_id, item_name, qty=1):
     cursor.execute("SELECT quantity FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
     row = cursor.fetchone()
-    if row: cursor.execute("UPDATE inventory SET quantity = quantity + ? WHERE user_id=? AND item_name=?", (qty, user_id, item_name))
-    else: cursor.execute("INSERT INTO inventory (user_id, item_name, quantity) VALUES (?, ?, ?)", (user_id, item_name, qty))
+    if row:
+        cursor.execute("UPDATE inventory SET quantity = quantity + ? WHERE user_id=? AND item_name=?", (qty, user_id, item_name))
+    else:
+        cursor.execute("INSERT INTO inventory (user_id, item_name, quantity) VALUES (?, ?, ?)", (user_id, item_name, qty))
     conn.commit()
 
 def remove_item(user_id, item_name, qty=1):
@@ -283,8 +303,10 @@ def remove_item(user_id, item_name, qty=1):
     if not row: return False
     if row[0] < qty: return False
     new_qty = row[0] - qty
-    if new_qty == 0: cursor.execute("DELETE FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
-    else: cursor.execute("UPDATE inventory SET quantity=? WHERE user_id=? AND item_name=?", (new_qty, user_id, item_name))
+    if new_qty == 0:
+        cursor.execute("DELETE FROM inventory WHERE user_id=? AND item_name=?", (user_id, item_name))
+    else:
+        cursor.execute("UPDATE inventory SET quantity=? WHERE user_id=? AND item_name=?", (new_qty, user_id, item_name))
     conn.commit()
     return True
 
@@ -360,32 +382,41 @@ def reset_user(user_id):
 # UI / BUTTONS
 # =========================
 def external_buttons():
-    return [[InlineKeyboardButton("📞 Destek", url=fixed_url(SUPPORT_URL)), InlineKeyboardButton("➕ Beni Gruba Ekle", url=fixed_url(ADD_GROUP_URL))]]
+    return [[
+        InlineKeyboardButton("📞 Destek", url=fixed_url(SUPPORT_URL)),
+        InlineKeyboardButton("➕ Beni Gruba Ekle", url=fixed_url(ADD_GROUP_URL))
+    ]]
 
 def nav_main():
-    rows = [[InlineKeyboardButton("🏠 Ana Menü", callback_data="back_main"), InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games")],
-            [InlineKeyboardButton("📊 Profil", callback_data="menu_profile"), InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance")]]
+    rows = [
+        [InlineKeyboardButton("🏠 Ana Menü", callback_data="back_main"), InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games")],
+        [InlineKeyboardButton("📊 Profil", callback_data="menu_profile"), InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance")]
+    ]
     rows.extend(external_buttons())
     return InlineKeyboardMarkup(rows)
 
 def main_menu():
-    rows = [[InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"), InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games")],
-            [InlineKeyboardButton("📊 Profil", callback_data="menu_profile"), InlineKeyboardButton("🏦 Banka", callback_data="menu_bank")],
-            [InlineKeyboardButton("💎 VIP", callback_data="menu_vip"), InlineKeyboardButton("🎁 Ödüller", callback_data="menu_rewards")],
-            [InlineKeyboardButton("🛒 Market", callback_data="menu_market"), InlineKeyboardButton("🎒 Envanter", callback_data="menu_inventory")],
-            [InlineKeyboardButton("📜 Görevler", callback_data="menu_missions"), InlineKeyboardButton("🏅 Başarımlar", callback_data="menu_achievements")],
-            [InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"), InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help")]]
+    rows = [
+        [InlineKeyboardButton("💰 Bakiye", callback_data="menu_balance"), InlineKeyboardButton("🎮 Oyunlar", callback_data="menu_games")],
+        [InlineKeyboardButton("📊 Profil", callback_data="menu_profile"), InlineKeyboardButton("🏦 Banka", callback_data="menu_bank")],
+        [InlineKeyboardButton("💎 VIP", callback_data="menu_vip"), InlineKeyboardButton("🎁 Ödüller", callback_data="menu_rewards")],
+        [InlineKeyboardButton("🛒 Market", callback_data="menu_market"), InlineKeyboardButton("🎒 Envanter", callback_data="menu_inventory")],
+        [InlineKeyboardButton("📜 Görevler", callback_data="menu_missions"), InlineKeyboardButton("🏅 Başarımlar", callback_data="menu_achievements")],
+        [InlineKeyboardButton("🏆 Sıralama", callback_data="menu_top"), InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help")]
+    ]
     rows.extend(external_buttons())
     return InlineKeyboardMarkup(rows)
 
 def games_menu():
-    rows = [[InlineKeyboardButton("🎡 Rulet", callback_data="info_rulet"), InlineKeyboardButton("🃏 Blackjack", callback_data="info_blackjack")],
-            [InlineKeyboardButton("♠️ Poker", callback_data="info_poker"), InlineKeyboardButton("🎰 Slot", callback_data="info_slot")],
-            [InlineKeyboardButton("🎲 Zar", callback_data="info_zar"), InlineKeyboardButton("🏀 Basket", callback_data="info_basket")],
-            [InlineKeyboardButton("🪙 Coinflip", callback_data="info_coinflip"), InlineKeyboardButton("🔢 Guess", callback_data="info_guess")],
-            [InlineKeyboardButton("📈 HighLow", callback_data="info_highlow"), InlineKeyboardButton("🚀 Crash", callback_data="info_crash")],
-            [InlineKeyboardButton("💣 Mines", callback_data="info_mines"), InlineKeyboardButton("⚔️ Duel", callback_data="info_duel")],
-            [InlineKeyboardButton("⬅️ Ana Menü", callback_data="back_main")]]
+    rows = [
+        [InlineKeyboardButton("🎡 Rulet", callback_data="info_rulet"), InlineKeyboardButton("🃏 Blackjack", callback_data="info_blackjack")],
+        [InlineKeyboardButton("♠️ Poker", callback_data="info_poker"), InlineKeyboardButton("🎰 Slot", callback_data="info_slot")],
+        [InlineKeyboardButton("🎲 Zar", callback_data="info_zar"), InlineKeyboardButton("🏀 Basket", callback_data="info_basket")],
+        [InlineKeyboardButton("🪙 Coinflip", callback_data="info_coinflip"), InlineKeyboardButton("🔢 Guess", callback_data="info_guess")],
+        [InlineKeyboardButton("📈 HighLow", callback_data="info_highlow"), InlineKeyboardButton("🚀 Crash", callback_data="info_crash")],
+        [InlineKeyboardButton("💣 Mines", callback_data="info_mines"), InlineKeyboardButton("⚔️ Duel", callback_data="info_duel")],
+        [InlineKeyboardButton("⬅️ Ana Menü", callback_data="back_main")]
+    ]
     rows.extend(external_buttons())
     return InlineKeyboardMarkup(rows)
 
@@ -397,12 +428,10 @@ _last_global_edit = 0.0
 _last_edit_times = {}
 _last_edit_texts = {}
 
-async def safe_edit(message, text, reply_markup=None, min_interval=1.5):
+async def safe_edit(message, text, reply_markup=None, min_interval=1.3):
     global _last_global_edit
 
     key = (message.chat_id, message.message_id)
-    now_mono = time.monotonic()
-
     last_time = _last_edit_times.get(key, 0)
     last_text = _last_edit_texts.get(key)
 
@@ -417,28 +446,21 @@ async def safe_edit(message, text, reply_markup=None, min_interval=1.5):
             await asyncio.sleep(min_interval - diff)
 
         global_diff = time.monotonic() - _last_global_edit
-        if global_diff < 1.1:
-            await asyncio.sleep(1.1 - global_diff)
+        if global_diff < 1.0:
+            await asyncio.sleep(1.0 - global_diff)
 
         for _ in range(3):
             try:
-                await message.edit_text(
-                    text=text,
-                    parse_mode="HTML",
-                    reply_markup=reply_markup
-                )
+                await message.edit_text(text=text, parse_mode="HTML", reply_markup=reply_markup)
                 _last_global_edit = time.monotonic()
                 _last_edit_times[key] = _last_global_edit
                 _last_edit_texts[key] = text
                 return
-
             except RetryAfter as e:
                 logging.warning(f"Hız limiti yendi. {e.retry_after} sn bekleniyor.")
                 await asyncio.sleep(e.retry_after + 1)
-
             except TimedOut:
-                await asyncio.sleep(1.5)
-
+                await asyncio.sleep(1.2)
             except BadRequest as e:
                 err = str(e).lower()
                 if "message is not modified" in err:
@@ -446,37 +468,48 @@ async def safe_edit(message, text, reply_markup=None, min_interval=1.5):
                 if "message to edit not found" in err:
                     return
                 raise
-
-            except Exception as e:
-                await asyncio.sleep(1.5)
+            except Exception:
+                await asyncio.sleep(1.2)
 
     try:
         await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
     except Exception:
         pass
 
-async def animated_panel(message, frames, delay=1.2, reply_markup=None):
-    if len(frames) >= 5:
-        reduced = [frames[0], frames[len(frames)//3], frames[len(frames)*2//3], frames[-1]]
-    elif len(frames) >= 3:
-        reduced = [frames[0], frames[len(frames)//2], frames[-1]]
+async def animated_panel(message, frames, delay=1.1, reply_markup=None, fast_mode=False):
+    if fast_mode:
+        if len(frames) >= 2:
+            reduced = [frames[0], frames[-1]]
+        else:
+            reduced = frames
+        local_min = 1.0
+        local_delay = 0.8
     else:
-        reduced = frames
+        if len(frames) >= 5:
+            reduced = [frames[0], frames[len(frames)//3], frames[len(frames)*2//3], frames[-1]]
+        elif len(frames) >= 3:
+            reduced = [frames[0], frames[len(frames)//2], frames[-1]]
+        else:
+            reduced = frames
+        local_min = 1.3
+        local_delay = delay
 
     for i, frame in enumerate(reduced):
         await safe_edit(
             message,
             frame,
             reply_markup if i == len(reduced) - 1 else None,
-            min_interval=1.5
+            min_interval=local_min
         )
         if i != len(reduced) - 1:
-            await asyncio.sleep(delay)
+            await asyncio.sleep(local_delay)
 
 async def send_log(context, text):
     if LOG_CHANNEL_ID:
-        try: await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML")
-        except: pass
+        try:
+            await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML")
+        except:
+            pass
 
 def start_text(name):
     return ("╔══════════════════════╗\n      🚀 <b>CASINO V5 ULTRA</b>\n╚══════════════════════╝\n\n"
@@ -490,10 +523,17 @@ def home_panel(row, user_id):
             f"{vip_tag}👤 Oyuncu: <b>{row[1]}</b>\n⭐ Level: <b>{row[5]}</b>\n✨ XP: <b>{row[4]}</b>\n"
             f"🔥 Günlük Streak: <b>{row[13]}</b>\n💰 Toplam Servet: <b>{format_number(total)} 🪙</b>\n\nBir panel seç ve devam et.")
 
+def short_result_prefix(update: Update):
+    return "👥 Grup Modu\n" if is_group_chat(update) else ""
+
 # =========================
 # GAME / ACH
 # =========================
-MARKET_ITEMS = {"vip_ticket": {"name": "VIP Bilet", "price": 5000}, "lucky_box": {"name": "Şans Kutusu", "price": 2500}, "gold_chip": {"name": "Altın Chip", "price": 1000}}
+MARKET_ITEMS = {
+    "vip_ticket": {"name": "VIP Bilet", "price": 5000},
+    "lucky_box": {"name": "Şans Kutusu", "price": 2500},
+    "gold_chip": {"name": "Altın Chip", "price": 1000}
+}
 
 def check_achievements(user_id):
     row = get_user_row(user_id)
@@ -521,9 +561,11 @@ def process_game_result(user_id, game_name, bet, outcome, profit=0):
     else:
         add_stats(user_id, played=1, games_won=0)
         log_game(user_id, game_name, bet, "draw", 0)
+
     result = add_xp(user_id, xp_gain)
     levelup_text = ""
-    if result and result[0]: levelup_text = f"\n\n🎉 <b>Level atladın!</b> Yeni level: <b>{result[1]}</b>"
+    if result and result[0]:
+        levelup_text = f"\n\n🎉 <b>Level atladın!</b> Yeni level: <b>{result[1]}</b>"
     check_achievements(user_id)
     return levelup_text
 
@@ -565,10 +607,12 @@ async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def use_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: item_code = context.args[0].lower()
+    try:
+        item_code = context.args[0].lower()
     except:
         await update.message.reply_text("Kullanım: /use [item_adi]\nÖrnek: /use vip_ticket")
         return
+
     if item_code == "vip_ticket":
         if not has_item(user.id, "VIP Bilet"):
             await update.message.reply_text("❌ Envanterinde VIP Bilet yok.")
@@ -576,7 +620,12 @@ async def use_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remove_item(user.id, "VIP Bilet", 1)
         until = activate_vip(user.id, VIP_DURATION_DAYS)
         check_achievements(user.id)
-        await update.message.reply_text(f"💎 <b>VIP aktif edildi!</b>\n\nSüre: <b>{VIP_DURATION_DAYS} gün</b>\nBitiş: <b>{until.strftime('%Y-%m-%d %H:%M')}</b>\nGünlük bonusun artık <b>{format_number(VIP_DAILY_BONUS)} 🪙</b>", parse_mode="HTML")
+        await update.message.reply_text(
+            f"💎 <b>VIP aktif edildi!</b>\n\nSüre: <b>{VIP_DURATION_DAYS} gün</b>\n"
+            f"Bitiş: <b>{until.strftime('%Y-%m-%d %H:%M')}</b>\n"
+            f"Günlük bonusun artık <b>{format_number(VIP_DAILY_BONUS)} 🪙</b>",
+            parse_mode="HTML"
+        )
         await send_log(context, f"💎 <b>VIP Aktif</b>\n👤 {get_display_name(user)}\n🆔 <code>{user.id}</code>")
         return
     await update.message.reply_text("❌ Bu item kullanılamıyor.")
@@ -587,7 +636,12 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = get_user_row(user.id)
     cash, bankv = row[2], row[3]
     vip_tag = "💎 <b>VIP Oyuncu</b>\n" if is_vip(user.id) else ""
-    await update.message.reply_text(f"{vip_tag}💰 <b>Cüzdan:</b> {format_number(cash)} 🪙\n🏦 <b>Banka:</b> {format_number(bankv)} 🪙\n📦 <b>Toplam:</b> {format_number(cash + bankv)} 🪙", parse_mode="HTML")
+    await update.message.reply_text(
+        f"{vip_tag}💰 <b>Cüzdan:</b> {format_number(cash)} 🪙\n"
+        f"🏦 <b>Banka:</b> {format_number(bankv)} 🪙\n"
+        f"📦 <b>Toplam:</b> {format_number(cash + bankv)} 🪙",
+        parse_mode="HTML"
+    )
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -619,7 +673,12 @@ async def gunluk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_daily(user.id)
     check_achievements(user.id)
     vip_text = "\n💎 VIP bonus uygulandı!" if is_vip(user.id) else ""
-    await update.message.reply_text(f"🎁 <b>Günlük ödül alındı!</b>\nAsıl ödül: <b>{format_number(reward)} 🪙</b>\n🔥 Streak bonusu: <b>{format_number(streak_bonus)} 🪙</b>\nToplam: <b>{format_number(total_reward)} 🪙</b>\nStreak: <b>{streak}</b>{vip_text}", parse_mode="HTML")
+    await update.message.reply_text(
+        f"🎁 <b>Günlük ödül alındı!</b>\nAsıl ödül: <b>{format_number(reward)} 🪙</b>\n"
+        f"🔥 Streak bonusu: <b>{format_number(streak_bonus)} 🪙</b>\nToplam: <b>{format_number(total_reward)} 🪙</b>\n"
+        f"Streak: <b>{streak}</b>{vip_text}",
+        parse_mode="HTML"
+    )
     await send_log(context, f"🎁 <b>Günlük</b>\n👤 {get_display_name(user)}\n💰 +{format_number(total_reward)} 🪙")
 
 async def haftalik(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -653,7 +712,10 @@ async def faiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     update_bank(user.id, interest)
     set_last_interest(user.id)
-    await update.message.reply_text(f"🏦 <b>Faiz alındı!</b>\nOran: <b>%{int(BANK_INTEREST_RATE*100)}</b>\nKazanç: <b>+{format_number(interest)} 🪙</b>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"🏦 <b>Faiz alındı!</b>\nOran: <b>%{int(BANK_INTEREST_RATE * 100)}</b>\nKazanç: <b>+{format_number(interest)} 🪙</b>",
+        parse_mode="HTML"
+    )
     await send_log(context, f"🏦 <b>Faiz</b>\n👤 {get_display_name(user)}\n💰 +{format_number(interest)} 🪙")
 
 async def bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -664,7 +726,8 @@ async def bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: amount = int(context.args[0])
+    try:
+        amount = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /deposit [miktar]")
         return
@@ -682,7 +745,8 @@ async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: amount = int(context.args[0])
+    try:
+        amount = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /withdraw [miktar]")
         return
@@ -708,7 +772,8 @@ async def gonder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     get_user(sender.id, get_display_name(sender))
     get_user(receiver.id, get_display_name(receiver))
-    try: amount = int(context.args[0])
+    try:
+        amount = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /gonder [miktar]")
         return
@@ -721,7 +786,10 @@ async def gonder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok1 = update_balance(sender.id, -amount)
     ok2 = update_balance(receiver.id, amount)
     if ok1 and ok2:
-        await update.message.reply_text(f"💸 <b>{get_display_name(receiver)}</b> kullanıcısına <b>{format_number(amount)} 🪙</b> gönderildi.", parse_mode="HTML")
+        await update.message.reply_text(
+            f"💸 <b>{get_display_name(receiver)}</b> kullanıcısına <b>{format_number(amount)} 🪙</b> gönderildi.",
+            parse_mode="HTML"
+        )
     else:
         await update.message.reply_text("❌ Transfer başarısız.")
 
@@ -738,7 +806,8 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: code = context.args[0]
+    try:
+        code = context.args[0]
     except:
         await update.message.reply_text("Kullanım: /buy [item_kodu]")
         return
@@ -757,7 +826,10 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if code == "lucky_box":
         bonus = random.randint(500, 3000)
         update_balance(user.id, bonus)
-        await update.message.reply_text(f"🛒 Satın alındı: <b>{item['name']}</b>\n💰 -{format_number(price)} 🪙\n🎁 Kutudan çıktı: <b>+{format_number(bonus)} 🪙</b>", parse_mode="HTML")
+        await update.message.reply_text(
+            f"🛒 Satın alındı: <b>{item['name']}</b>\n💰 -{format_number(price)} 🪙\n🎁 Kutudan çıktı: <b>+{format_number(bonus)} 🪙</b>",
+            parse_mode="HTML"
+        )
         return
     await update.message.reply_text(f"🛒 Satın alındı: <b>{item['name']}</b>\n💰 -{format_number(price)} 🪙", parse_mode="HTML")
 
@@ -769,7 +841,8 @@ async def inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🎒 Envanterin boş.")
         return
     text = "╔══════════════════════╗\n      🎒 <b>PREMIUM ENVANTER</b>\n╚══════════════════════╝\n\n"
-    for name, qty in items: text += f"• <b>{name}</b> × {qty}\n"
+    for name, qty in items:
+        text += f"• <b>{name}</b> × {qty}\n"
     text += "\nKullanım:\n• /use [item_adi]"
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -790,7 +863,8 @@ async def missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: mission_id = int(context.args[0])
+    try:
+        mission_id = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /claim [görev_id]")
         return
@@ -808,7 +882,8 @@ async def achievements(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🏅 Henüz başarımın yok.")
         return
     text = "╔══════════════════════╗\n      🏅 <b>BAŞARIM GALERİSİ</b>\n╚══════════════════════╝\n\n"
-    for name, unlocked_at in achs: text += f"🏅 {name}\n"
+    for name, unlocked_at in achs:
+        text += f"🏅 {name}\n"
     await update.message.reply_text(text, parse_mode="HTML")
 
 # =========================
@@ -825,7 +900,10 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users, money, logs = global_stats()
-    await update.message.reply_text(f"📊 <b>Global İstatistik</b>\n\n👥 Kullanıcı: {users}\n💰 Toplam Varlık: {format_number(money)} 🪙\n🎮 Toplam Oyun Logu: {format_number(logs)}", parse_mode="HTML")
+    await update.message.reply_text(
+        f"📊 <b>Global İstatistik</b>\n\n👥 Kullanıcı: {users}\n💰 Toplam Varlık: {format_number(money)} 🪙\n🎮 Toplam Oyun Logu: {format_number(logs)}",
+        parse_mode="HTML"
+    )
 
 async def addcoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -837,7 +915,8 @@ async def addcoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     target = update.message.reply_to_message.from_user
     get_user(target.id, get_display_name(target))
-    try: amount = int(context.args[0])
+    try:
+        amount = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /addcoin [miktar]\nÖrnek: /addcoin 5000")
         return
@@ -863,7 +942,8 @@ async def setcoin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     target = update.message.reply_to_message.from_user
     get_user(target.id, get_display_name(target))
-    try: amount = int(context.args[0])
+    try:
+        amount = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /setcoin [miktar]")
         return
@@ -883,7 +963,8 @@ async def setbank(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     target = update.message.reply_to_message.from_user
     get_user(target.id, get_display_name(target))
-    try: amount = int(context.args[0])
+    try:
+        amount = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /setbank [miktar]")
         return
@@ -917,16 +998,20 @@ async def backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("SELECT * FROM missions"); data["missions"] = cursor.fetchall()
     cursor.execute("SELECT * FROM game_logs"); data["game_logs"] = cursor.fetchall()
     filename = f"backup_{int(datetime.utcnow().timestamp())}.json"
-    with open(filename, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
-    with open(filename, "rb") as f: await update.message.reply_document(f, filename=filename, caption="✅ Yedek alındı")
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(filename, "rb") as f:
+        await update.message.reply_document(f, filename=filename, caption="✅ Yedek alındı")
 
 # =========================
 # GAMES
 # =========================
 async def rulet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0]); color = context.args[1].lower()
+    try:
+        bet = int(context.args[0]); color = context.args[1].lower()
     except:
         await update.message.reply_text("Kullanım: /rulet [miktar] [kırmızı/siyah]")
         return
@@ -936,138 +1021,198 @@ async def rulet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     msg = await update.message.reply_text("🎡 <b>Rulet hazırlanıyor...</b>", parse_mode="HTML")
     result = random.choice(["kırmızı", "siyah"])
-    await animated_panel(msg, [f"🎡 <b>Rulet dönüyor...</b>\n\n💰 Bahis: {format_number(bet)} 🪙\n🎯 Seçim: {color}", "🔴 ⚫ 🔴 ⚫ 🔴\n<b>Dönüyor...</b>", "⚫ 🔴 ⚫ 🔴 ⚫\n<b>Yavaşlıyor...</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        [
+            f"🎡 <b>Rulet dönüyor...</b>\n\n💰 Bahis: {format_number(bet)} 🪙\n🎯 Seçim: {color}",
+            "🔴 ⚫ 🔴 ⚫ 🔴\n<b>Dönüyor...</b>",
+            "⚫ 🔴 ⚫ 🔴 ⚫\n<b>Yavaşlıyor...</b>"
+        ],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     if color == result:
         lvl = process_game_result(user.id, "rulet", bet, "win", bet)
-        text = f"🎡 <b>RULET SONUCU</b>\n\n🎯 Seçim: <b>{color}</b>\n🎡 Sonuç: <b>{result}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🎡 <b>RULET SONUCU</b>\n\n🎯 Seçim: <b>{color}</b>\n🎡 Sonuç: <b>{result}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "rulet", bet, "lose")
-        text = f"🎡 <b>RULET SONUCU</b>\n\n🎯 Seçim: <b>{color}</b>\n🎡 Sonuç: <b>{result}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}🎡 <b>RULET SONUCU</b>\n\n🎯 Seçim: <b>{color}</b>\n🎡 Sonuç: <b>{result}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def blackjack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
+    try:
+        bet = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /blackjack [miktar]")
         return
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     player, botv = random.randint(15, 21), random.randint(15, 21)
     msg = await update.message.reply_text("🃏 <b>Kartlar dağıtılıyor...</b>", parse_mode="HTML")
-    await animated_panel(msg, ["🃏 <b>Kartlar dağıtılıyor...</b>\n\nSen: 🂠🂠\nBot: 🂠🂠", "🃏 <b>Gerilim artıyor...</b>\n\nSen: 🂡🂭\nBot: 🂠🂠", f"🃏 <b>Kartlar açılıyor...</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        [
+            "🃏 <b>Kartlar dağıtılıyor...</b>\n\nSen: 🂠🂠\nBot: 🂠🂠",
+            "🃏 <b>Gerilim artıyor...</b>\n\nSen: 🂡🂭\nBot: 🂠🂠",
+            f"🃏 <b>Kartlar açılıyor...</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>"
+        ],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     if player > botv:
         lvl = process_game_result(user.id, "blackjack", bet, "win", bet)
-        text = f"🃏 <b>BLACKJACK</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🃏 <b>BLACKJACK</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
     elif player < botv:
         lvl = process_game_result(user.id, "blackjack", bet, "lose")
-        text = f"🃏 <b>BLACKJACK</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🃏 <b>BLACKJACK</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "blackjack", bet, "draw")
-        text = f"🃏 <b>BLACKJACK</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🤝 Berabere{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}🃏 <b>BLACKJACK</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🤝 Berabere{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def poker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
+    try:
+        bet = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /poker [miktar]")
         return
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     player, botv = random.randint(1, 100), random.randint(1, 100)
     msg = await update.message.reply_text("♠️ <b>Poker eli hazırlanıyor...</b>", parse_mode="HTML")
-    await animated_panel(msg, ["♠️ <b>Kartlar karılıyor...</b>", "♠️ <b>Dağıtılıyor...</b>\n\nSen: 🂠🂠🂠\nBot: 🂠🂠🂠", f"♠️ <b>Eller açılıyor...</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        [
+            "♠️ <b>Kartlar karılıyor...</b>",
+            "♠️ <b>Dağıtılıyor...</b>\n\nSen: 🂠🂠🂠\nBot: 🂠🂠🂠",
+            f"♠️ <b>Eller açılıyor...</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>"
+        ],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     if player > botv:
         lvl = process_game_result(user.id, "poker", bet, "win", bet)
-        text = f"♠️ <b>POKER</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}♠️ <b>POKER</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
     elif player < botv:
         lvl = process_game_result(user.id, "poker", bet, "lose")
-        text = f"♠️ <b>POKER</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}♠️ <b>POKER</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "poker", bet, "draw")
-        text = f"♠️ <b>POKER</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🤝 Berabere{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}♠️ <b>POKER</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🤝 Berabere{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def slot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
-    except: bet = 50
+    try:
+        bet = int(context.args[0])
+    except:
+        bet = 50
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     await update.message.reply_text(f"🎰 <b>Makine çalıştırılıyor...</b>\n💰 Bahis: {format_number(bet)} 🪙", parse_mode="HTML")
     await asyncio.sleep(0.6)
     msg = await update.message.reply_dice(emoji="🎰")
     value = msg.dice.value
     await asyncio.sleep(2.5)
+
     if value > 50:
         profit = bet * 4
         lvl = process_game_result(user.id, "slot", bet, "win", profit)
-        text = f"🎰 <b>SLOT SONUCU</b>\n\nDeğer: <b>{value}</b>\n💥 JACKPOT!\n🎉 +{format_number(profit)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🎰 <b>SLOT SONUCU</b>\n\nDeğer: <b>{value}</b>\n💥 JACKPOT!\n🎉 +{format_number(profit)} 🪙{lvl}"
     elif value > 25:
         profit = bet
         lvl = process_game_result(user.id, "slot", bet, "win", profit)
-        text = f"🎰 <b>SLOT SONUCU</b>\n\nDeğer: <b>{value}</b>\n🙂 Kazandın!\n🎉 +{format_number(profit)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🎰 <b>SLOT SONUCU</b>\n\nDeğer: <b>{value}</b>\n🙂 Kazandın!\n🎉 +{format_number(profit)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "slot", bet, "lose")
-        text = f"🎰 <b>SLOT SONUCU</b>\n\nDeğer: <b>{value}</b>\n😢 Kaybettin!\n-{format_number(bet)} 🪙{lvl}"
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=nav_main())
+        text = f"{short_result_prefix(update)}🎰 <b>SLOT SONUCU</b>\n\nDeğer: <b>{value}</b>\n😢 Kaybettin!\n-{format_number(bet)} 🪙{lvl}"
+
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=None if is_group_chat(update) else nav_main())
 
 async def zar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
-    except: bet = 50
+    try:
+        bet = int(context.args[0])
+    except:
+        bet = 50
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     await update.message.reply_text(f"🎲 <b>Zar atılıyor...</b>\n💰 Bahis: {format_number(bet)} 🪙", parse_mode="HTML")
     msg = await update.message.reply_dice(emoji="🎲")
     player, botv = msg.dice.value, random.randint(1, 6)
     await asyncio.sleep(2.5)
+
     if player > botv:
         lvl = process_game_result(user.id, "zar", bet, "win", bet)
-        text = f"🎲 <b>ZAR SONUCU</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🎲 <b>ZAR SONUCU</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
     elif player < botv:
         lvl = process_game_result(user.id, "zar", bet, "lose")
-        text = f"🎲 <b>ZAR SONUCU</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🎲 <b>ZAR SONUCU</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "zar", bet, "draw")
-        text = f"🎲 <b>ZAR SONUCU</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🤝 Berabere{lvl}"
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=nav_main())
+        text = f"{short_result_prefix(update)}🎲 <b>ZAR SONUCU</b>\n\nSen: <b>{player}</b>\nBot: <b>{botv}</b>\n\n🤝 Berabere{lvl}"
+
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=None if is_group_chat(update) else nav_main())
 
 async def basket(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
-    except: bet = 50
+    try:
+        bet = int(context.args[0])
+    except:
+        bet = 50
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     await update.message.reply_text(f"🏀 <b>Top havalandı...</b>\n💰 Bahis: {format_number(bet)} 🪙", parse_mode="HTML")
     msg = await update.message.reply_dice(emoji="🏀")
     value = msg.dice.value
     await asyncio.sleep(2.5)
+
     if value >= 4:
         lvl = process_game_result(user.id, "basket", bet, "win", bet)
-        text = f"🏀 <b>BASKET SONUCU</b>\n\nAtış: <b>{value}</b>\n🎉 Basket oldu!\n+{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🏀 <b>BASKET SONUCU</b>\n\nAtış: <b>{value}</b>\n🎉 Basket oldu!\n+{format_number(bet)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "basket", bet, "lose")
-        text = f"🏀 <b>BASKET SONUCU</b>\n\nAtış: <b>{value}</b>\n😢 Kaçtı!\n-{format_number(bet)} 🪙{lvl}"
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=nav_main())
+        text = f"{short_result_prefix(update)}🏀 <b>BASKET SONUCU</b>\n\nAtış: <b>{value}</b>\n😢 Kaçtı!\n-{format_number(bet)} 🪙{lvl}"
+
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=None if is_group_chat(update) else nav_main())
 
 async def coinflip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0]); choice = context.args[1].lower()
+    try:
+        bet = int(context.args[0]); choice = context.args[1].lower()
     except:
         await update.message.reply_text("Kullanım: /coinflip [miktar] [yazi/tura]")
         return
@@ -1077,21 +1222,32 @@ async def coinflip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     result = random.choice(["yazi", "tura"])
     msg = await update.message.reply_text("🪙 <b>Para havaya atıldı...</b>", parse_mode="HTML")
-    await animated_panel(msg, ["🪙 <b>Takla 1...</b>", "🪙 <b>Takla 2...</b>", "🪙 <b>Takla 3...</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        ["🪙 <b>Takla 1...</b>", "🪙 <b>Takla 2...</b>", "🪙 <b>Takla 3...</b>"],
+        delay=0.9,
+        fast_mode=fast
+    )
+
     if result == choice:
         lvl = process_game_result(user.id, "coinflip", bet, "win", bet)
-        text = f"🪙 <b>COINFLIP SONUCU</b>\n\n🎯 Seçim: <b>{choice}</b>\n📌 Sonuç: <b>{result}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🪙 <b>COINFLIP SONUCU</b>\n\n🎯 Seçim: <b>{choice}</b>\n📌 Sonuç: <b>{result}</b>\n\n🎉 +{format_number(bet)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "coinflip", bet, "lose")
-        text = f"🪙 <b>COINFLIP SONUCU</b>\n\n🎯 Seçim: <b>{choice}</b>\n📌 Sonuç: <b>{result}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}🪙 <b>COINFLIP SONUCU</b>\n\n🎯 Seçim: <b>{choice}</b>\n📌 Sonuç: <b>{result}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0]); guess_num = int(context.args[1])
+    try:
+        bet = int(context.args[0]); guess_num = int(context.args[1])
     except:
         await update.message.reply_text("Kullanım: /guess [miktar] [1-5]")
         return
@@ -1101,22 +1257,33 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     result = random.randint(1, 5)
     msg = await update.message.reply_text("🔢 <b>Sayı seçiliyor...</b>", parse_mode="HTML")
-    await animated_panel(msg, ["🔢 1... 2... 3...", "🔢 4... 5...", "🔢 <b>Son sayı belirleniyor...</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        ["🔢 1... 2... 3...", "🔢 4... 5...", "🔢 <b>Son sayı belirleniyor...</b>"],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     if result == guess_num:
         profit = bet * 4
         lvl = process_game_result(user.id, "guess", bet, "win", profit)
-        text = f"🔢 <b>TAHMİN SONUCU</b>\n\n🎯 Tahminin: <b>{guess_num}</b>\n📌 Sayı: <b>{result}</b>\n\n🔥 +{format_number(profit)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🔢 <b>TAHMİN SONUCU</b>\n\n🎯 Tahminin: <b>{guess_num}</b>\n📌 Sayı: <b>{result}</b>\n\n🔥 +{format_number(profit)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "guess", bet, "lose")
-        text = f"🔢 <b>TAHMİN SONUCU</b>\n\n🎯 Tahminin: <b>{guess_num}</b>\n📌 Sayı: <b>{result}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}🔢 <b>TAHMİN SONUCU</b>\n\n🎯 Tahminin: <b>{guess_num}</b>\n📌 Sayı: <b>{result}</b>\n\n😢 -{format_number(bet)} 🪙{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def highlow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0]); choice = context.args[1].lower()
+    try:
+        bet = int(context.args[0]); choice = context.args[1].lower()
     except:
         await update.message.reply_text("Kullanım: /highlow [miktar] [high/low]")
         return
@@ -1126,97 +1293,147 @@ async def highlow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     number = random.randint(1, 100)
     msg = await update.message.reply_text("📈 <b>Sayı yükseliyor mu düşüyor mu...</b>", parse_mode="HTML")
-    await animated_panel(msg, ["📈 <b>Rastgele sayı üretiliyor...</b>", "📉 <b>Grafik hareket ediyor...</b>", "📊 <b>Sonuç açılıyor...</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        ["📈 <b>Rastgele sayı üretiliyor...</b>", "📉 <b>Grafik hareket ediyor...</b>", "📊 <b>Sonuç açılıyor...</b>"],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     if number == 50:
         lvl = process_game_result(user.id, "highlow", bet, "draw")
-        text = f"📈 <b>HIGHLOW SONUCU</b>\n\nSayı: <b>{number}</b>\n🤝 Berabere{lvl}"
+        text = f"{short_result_prefix(update)}📈 <b>HIGHLOW SONUCU</b>\n\nSayı: <b>{number}</b>\n🤝 Berabere{lvl}"
     else:
         result = "high" if number > 50 else "low"
         if choice == result:
             lvl = process_game_result(user.id, "highlow", bet, "win", bet)
-            text = f"📈 <b>HIGHLOW SONUCU</b>\n\nSeçim: <b>{choice}</b>\nSayı: <b>{number}</b>\n🎉 +{format_number(bet)} 🪙{lvl}"
+            text = f"{short_result_prefix(update)}📈 <b>HIGHLOW SONUCU</b>\n\nSeçim: <b>{choice}</b>\nSayı: <b>{number}</b>\n🎉 +{format_number(bet)} 🪙{lvl}"
         else:
             lvl = process_game_result(user.id, "highlow", bet, "lose")
-            text = f"📈 <b>HIGHLOW SONUCU</b>\n\nSeçim: <b>{choice}</b>\nSayı: <b>{number}</b>\n😢 -{format_number(bet)} 🪙{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+            text = f"{short_result_prefix(update)}📈 <b>HIGHLOW SONUCU</b>\n\nSeçim: <b>{choice}</b>\nSayı: <b>{number}</b>\n😢 -{format_number(bet)} 🪙{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def crash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
+    try:
+        bet = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /crash [miktar]")
         return
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     multiplier = round(random.uniform(0.5, 5.0), 2)
     msg = await update.message.reply_text("🚀 <b>Roket kalkıyor...</b>\n\nx1.00", parse_mode="HTML")
-    visible_steps = [1.10, 1.50, 2.00, 2.70]
+
+    visible_steps = [1.10, 1.50, 2.00, 2.70] if not fast else [1.40, 2.00]
     for step in visible_steps:
         if step >= multiplier:
             break
-        await safe_edit(msg, f"🚀 <b>Roket yükseliyor...</b>\n\nx{step:.2f}", min_interval=1.5)
-        await asyncio.sleep(1.2)
+        await safe_edit(msg, f"🚀 <b>Roket yükseliyor...</b>\n\nx{step:.2f}", min_interval=1.2 if not fast else 1.0)
+        await asyncio.sleep(1.0 if not fast else 0.8)
+
     if multiplier >= 2.0:
         profit = int(bet * multiplier) - bet
         if profit < bet: profit = bet
         lvl = process_game_result(user.id, "crash", bet, "win", profit)
-        text = f"🚀 <b>CRASH SONUCU</b>\n\nÇarpan: <b>x{multiplier:.2f}</b>\n🎉 +{format_number(profit)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}🚀 <b>CRASH SONUCU</b>\n\nÇarpan: <b>x{multiplier:.2f}</b>\n🎉 +{format_number(profit)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "crash", bet, "lose")
-        text = f"🚀 <b>CRASH SONUCU</b>\n\nÇarpan: <b>x{multiplier:.2f}</b>\n💥 Patladı!\n😢 -{format_number(bet)} 🪙{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}🚀 <b>CRASH SONUCU</b>\n\nÇarpan: <b>x{multiplier:.2f}</b>\n💥 Patladı!\n😢 -{format_number(bet)} 🪙{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def mines(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    fast = is_group_chat(update)
     get_user(user.id, get_display_name(user))
-    try: bet = int(context.args[0])
+    try:
+        bet = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /mines [miktar]")
         return
     if not is_valid_amount(bet) or get_balance(user.id) < bet:
         await update.message.reply_text("❌ Geçersiz bahis.")
         return
+
     outcome = random.choice(["safe", "safe", "safe", "bomb"])
     msg = await update.message.reply_text("💣 <b>Maden sahasına giriliyor...</b>", parse_mode="HTML")
-    await animated_panel(msg, ["⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n<b>Kare seçiliyor...</b>", "⬜ 💥 ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n<b>Bir alan kontrol edildi...</b>" if outcome == "bomb" else "⬜ 💎 ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n<b>Güvenli alan!</b>"], 1.2)
+
+    await animated_panel(
+        msg,
+        [
+            "⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n<b>Kare seçiliyor...</b>",
+            "⬜ 💥 ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n<b>Bir alan kontrol edildi...</b>" if outcome == "bomb"
+            else "⬜ 💎 ⬜\n⬜ ⬜ ⬜\n⬜ ⬜ ⬜\n\n<b>Güvenli alan!</b>"
+        ],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     if outcome == "safe":
         profit = bet * 2
         lvl = process_game_result(user.id, "mines", bet, "win", profit)
-        text = f"💣 <b>MINES SONUCU</b>\n\n💎 Güvenli kare buldun!\n🎉 +{format_number(profit)} 🪙{lvl}"
+        text = f"{short_result_prefix(update)}💣 <b>MINES SONUCU</b>\n\n💎 Güvenli kare buldun!\n🎉 +{format_number(profit)} 🪙{lvl}"
     else:
         lvl = process_game_result(user.id, "mines", bet, "lose")
-        text = f"💣 <b>MINES SONUCU</b>\n\n💥 Bombaya bastın!\n😢 -{format_number(bet)} 🪙{lvl}"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+        text = f"{short_result_prefix(update)}💣 <b>MINES SONUCU</b>\n\n💥 Bombaya bastın!\n😢 -{format_number(bet)} 🪙{lvl}"
+
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         await update.message.reply_text("❌ Reply ile kullan.\nÖrnek: /duel 500")
         return
+
     user1 = update.effective_user
     user2 = update.message.reply_to_message.from_user
+    fast = is_group_chat(update)
+
     if user1.id == user2.id:
         await update.message.reply_text("❌ Kendinle düello yapamazsın.")
         return
+
     get_user(user1.id, get_display_name(user1))
     get_user(user2.id, get_display_name(user2))
-    try: bet = int(context.args[0])
+
+    try:
+        bet = int(context.args[0])
     except:
         await update.message.reply_text("Kullanım: /duel [miktar]")
         return
+
     if not is_valid_amount(bet):
         await update.message.reply_text("❌ Geçerli miktar gir.")
         return
     if get_balance(user1.id) < bet or get_balance(user2.id) < bet:
         await update.message.reply_text("❌ Bir oyuncuda yeterli para yok.")
         return
+
     winner = random.choice([user1, user2])
     loser = user2 if winner.id == user1.id else user1
+
     msg = await update.message.reply_text("⚔️ <b>Düello başlıyor...</b>", parse_mode="HTML")
-    await animated_panel(msg, [f"⚔️ <b>{get_display_name(user1)}</b> vs <b>{get_display_name(user2)}</b>\n\nHazırlanıyor...", "🗡 Hamle 1...", "🛡 Savunma...", "⚡ Son darbe..."], 1.2)
+    await animated_panel(
+        msg,
+        [
+            f"⚔️ <b>{get_display_name(user1)}</b> vs <b>{get_display_name(user2)}</b>\n\nHazırlanıyor...",
+            "🗡 Hamle 1...",
+            "🛡 Savunma...",
+            "⚡ Son darbe..."
+        ],
+        delay=1.0,
+        fast_mode=fast
+    )
+
     update_balance(winner.id, bet)
     update_balance(loser.id, -bet)
     add_stats(winner.id, won=bet, played=1, games_won=1)
@@ -1230,9 +1447,10 @@ async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_game(loser.id, "duel", bet, "lose", -bet)
     check_achievements(winner.id)
     check_achievements(loser.id)
-    text = "╔══════════════════════╗\n      ⚔️ <b>DÜELLO SONUCU</b>\n╚══════════════════════╝\n\n"
-    text += f"🏆 Kazanan: <b>{get_display_name(winner)}</b>\n💰 Ödül: <b>+{format_number(bet)} 🪙</b>"
-    await safe_edit(msg, text, nav_main(), min_interval=1.5)
+
+    text = ("╔══════════════════════╗\n      ⚔️ <b>DÜELLO SONUCU</b>\n╚══════════════════════╝\n\n"
+            f"🏆 Kazanan: <b>{get_display_name(winner)}</b>\n💰 Ödül: <b>+{format_number(bet)} 🪙</b>")
+    await safe_edit(msg, text, nav_main() if not fast else None, min_interval=1.2)
 
 # =========================
 # CALLBACKS
@@ -1248,12 +1466,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "back_main":
         await safe_edit(query.message, home_panel(row, user.id), main_menu(), min_interval=1.0)
         return
+
     if data == "menu_balance":
         total = row[2] + row[3]
         vip_tag = "💎 VIP Aktif\n" if is_vip(user.id) else ""
         text = f"╔══════════════════════╗\n      💰 <b>BAKİYE PANELİ</b>\n╚══════════════════════╝\n\n{vip_tag}👛 Cüzdan: <b>{format_number(row[2])} 🪙</b>\n🏦 Banka: <b>{format_number(row[3])} 🪙</b>\n📦 Toplam: <b>{format_number(total)} 🪙</b>\n\nEkonomini dikkatli yönet."
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_profile":
         total = row[2] + row[3]
         games_played, games_won = row[8], row[9]
@@ -1262,15 +1482,18 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"╔══════════════════════╗\n       📊 <b>PROFİL KARTI</b>\n╚══════════════════════╝\n\n{vip_tag}👤 İsim: <b>{row[1]}</b>\n🆔 ID: <code>{row[0]}</code>\n⭐ Level: <b>{row[5]}</b>\n✨ XP: <b>{row[4]}</b>\n🔥 Streak: <b>{row[13]}</b>\n💰 Servet: <b>{format_number(total)} 🪙</b>\n🎮 Oyun: <b>{games_played}</b>\n🏆 Galibiyet: <b>{games_won}</b>\n📈 Winrate: <b>%{winrate}</b>"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_games":
         await safe_edit(query.message, "╔══════════════════════╗\n      🎮 <b>OYUN SALONU</b>\n╚══════════════════════╝\n\nŞansını denemek istediğin oyunu seç.\nAnimasyonlu oyun bilgileri aşağıda.", games_menu(), min_interval=1.0)
         return
+
     if data == "menu_bank":
         last_interest = get_last_interest(user.id)
         remain = interest_remaining(last_interest)
-        text = f"╔══════════════════════╗\n        🏦 <b>BANKA</b>\n╚══════════════════════╝\n\nMevcut banka bakiyen: <b>{format_number(row[3])} 🪙</b>\nFaiz: <b>%{int(BANK_INTEREST_RATE * 100)}</b>\nFaiz durumu: <b>{'Hazır ✅' if not remain else format_timedelta(remain)}</b>\n\nİşlemler:\n• /deposit [miktar]\n• /withdraw [miktar]\n• /faiz"
+        text = f"╔══════════════════════╗\n        🏦 <b>BANKA</b>\n╚══════════════════════╝\n\nMevcut banka bakiyen: <b>{format_number(row[3])} 🪙</b>\nFaiz: <b>%{int(BANK_INTEREST_RATE*100)}</b>\nFaiz durumu: <b>{'Hazır ✅' if not remain else format_timedelta(remain)}</b>\n\nİşlemler:\n• /deposit [miktar]\n• /withdraw [miktar]\n• /faiz"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_vip":
         remain = vip_remaining(user.id)
         if remain:
@@ -1279,27 +1502,34 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = f"╔══════════════════════╗\n        💎 <b>VIP PANEL</b>\n╚══════════════════════╝\n\nDurum: <b>Pasif ❌</b>\nVIP süresi: <b>{VIP_DURATION_DAYS} gün</b>\nGünlük VIP bonus: <b>{format_number(VIP_DAILY_BONUS)} 🪙</b>\n\nVIP için:\n• /buy vip_ticket\n• /use vip_ticket"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_rewards":
         d = daily_remaining(row[10])
         w = weekly_remaining(row[11])
         text = f"╔══════════════════════╗\n       🎁 <b>ÖDÜLLER</b>\n╚══════════════════════╝\n\n📅 Günlük: <b>{'Hazır ✅' if not d else format_timedelta(d)}</b>\n🗓 Haftalık: <b>{'Hazır ✅' if not w else format_timedelta(w)}</b>\n🔥 Streak: <b>{row[13]}</b>\n💎 VIP Günlük Bonus: <b>{format_number(VIP_DAILY_BONUS)} 🪙</b>\n\nKomutlar:\n• /gunluk\n• /haftalik"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_market":
         text = "╔══════════════════════╗\n      🛒 <b>PREMIUM MARKET</b>\n╚══════════════════════╝\n\n"
-        for code, item in MARKET_ITEMS.items(): text += f"🎟 <b>{item['name']}</b>\n💰 Fiyat: <b>{format_number(item['price'])} 🪙</b>\n🧾 Kod: <code>{code}</code>\n\n"
+        for code, item in MARKET_ITEMS.items():
+            text += f"🎟 <b>{item['name']}</b>\n💰 Fiyat: <b>{format_number(item['price'])} 🪙</b>\n🧾 Kod: <code>{code}</code>\n\n"
         text += "Satın almak için:\n• /buy [item_kodu]"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_inventory":
         items = get_inventory(user.id)
-        if not items: text = "╔══════════════════════╗\n      🎒 <b>PREMIUM ENVANTER</b>\n╚══════════════════════╝\n\nEnvanterin şu anda boş."
+        if not items:
+            text = "╔══════════════════════╗\n      🎒 <b>PREMIUM ENVANTER</b>\n╚══════════════════════╝\n\nEnvanterin şu anda boş."
         else:
             text = "╔══════════════════════╗\n      🎒 <b>PREMIUM ENVANTER</b>\n╚══════════════════════╝\n\n"
-            for name, qty in items: text += f"• <b>{name}</b> × {qty}\n"
+            for name, qty in items:
+                text += f"• <b>{name}</b> × {qty}\n"
             text += "\nKullanım:\n• /use [item_adi]"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_top":
         rows = top_users(10)
         text = "╔══════════════════════╗\n      🏆 <b>SIRALAMA</b>\n╚══════════════════════╝\n\n"
@@ -1309,6 +1539,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"{medal} <b>{i}.</b> {r[0]} — {format_number(total)} 🪙 | Lv.{r[3]}\n"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_missions":
         data_rows = get_missions(user.id)
         text = "╔══════════════════════╗\n      📜 <b>GÖREV PANOSU</b>\n╚══════════════════════╝\n\n"
@@ -1320,18 +1551,36 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "Ödül almak için:\n• /claim [görev_id]"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_achievements":
         achs = get_achievements(user.id)
         text = "╔══════════════════════╗\n      🏅 <b>BAŞARIM GALERİSİ</b>\n╚══════════════════════╝\n\n"
-        if not achs: text += "Henüz başarımın yok."
+        if not achs:
+            text += "Henüz başarımın yok."
         else:
-            for a in achs: text += f"🏅 {a[0]}\n"
+            for a in achs:
+                text += f"🏅 {a[0]}\n"
         await safe_edit(query.message, text, main_menu(), min_interval=1.0)
         return
+
     if data == "menu_help":
         await safe_edit(query.message, "╔══════════════════════╗\n        ℹ️ <b>YARDIM</b>\n╚══════════════════════╝\n\nKomut listesi için /help yaz.\nVIP sistemi için /vip yaz.\nFaiz için /faiz yaz.\nAdmin komutları reply ile çalışır.\n\n🎮 Oyun oyna\n💰 Coin kazan\n💎 VIP ol\n🔥 Streak yap\n🏦 Faiz kazan", main_menu(), min_interval=1.0)
         return
-    game_infos = {"info_rulet": "🎡 /rulet [miktar] [kırmızı/siyah]\nAnimasyon: rulet dönüşü", "info_blackjack": "🃏 /blackjack [miktar]\nAnimasyon: kart açılışı", "info_poker": "♠️ /poker [miktar]\nAnimasyon: el açılışı", "info_slot": "🎰 /slot [miktar]\nAnimasyon: Telegram slot zarı", "info_zar": "🎲 /zar [miktar]\nAnimasyon: Telegram zar", "info_basket": "🏀 /basket [miktar]\nAnimasyon: Telegram basket atışı", "info_coinflip": "🪙 /coinflip [miktar] [yazi/tura]\nAnimasyon: para taklası", "info_guess": "🔢 /guess [miktar] [1-5]\nAnimasyon: sayı açılışı", "info_highlow": "📈 /highlow [miktar] [high/low]\nAnimasyon: grafik açılışı", "info_crash": "🚀 /crash [miktar]\nAnimasyon: roket çarpanı", "info_mines": "💣 /mines [miktar]\nAnimasyon: maden sahası", "info_duel": "⚔️ /duel [miktar] (reply)\nAnimasyon: düello akışı"}
+
+    game_infos = {
+        "info_rulet": "🎡 /rulet [miktar] [kırmızı/siyah]\nAnimasyon: rulet dönüşü",
+        "info_blackjack": "🃏 /blackjack [miktar]\nAnimasyon: kart açılışı",
+        "info_poker": "♠️ /poker [miktar]\nAnimasyon: el açılışı",
+        "info_slot": "🎰 /slot [miktar]\nAnimasyon: Telegram slot zarı",
+        "info_zar": "🎲 /zar [miktar]\nAnimasyon: Telegram zar",
+        "info_basket": "🏀 /basket [miktar]\nAnimasyon: Telegram basket atışı",
+        "info_coinflip": "🪙 /coinflip [miktar] [yazi/tura]\nAnimasyon: para taklası",
+        "info_guess": "🔢 /guess [miktar] [1-5]\nAnimasyon: sayı açılışı",
+        "info_highlow": "📈 /highlow [miktar] [high/low]\nAnimasyon: grafik açılışı",
+        "info_crash": "🚀 /crash [miktar]\nAnimasyon: roket çarpanı",
+        "info_mines": "💣 /mines [miktar]\nAnimasyon: maden sahası",
+        "info_duel": "⚔️ /duel [miktar] (reply)\nAnimasyon: düello akışı"
+    }
     if data in game_infos:
         await safe_edit(query.message, f"╔══════════════════════╗\n      🎮 <b>OYUN BİLGİSİ</b>\n╚══════════════════════╝\n\n{game_infos[data]}", games_menu(), min_interval=1.0)
         return
@@ -1352,6 +1601,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
     app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CommandHandler("help", help_cmd))
@@ -1393,7 +1643,8 @@ def main():
     app.add_handler(CommandHandler("backup", backup))
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_error_handler(error_handler)
-    print("🤖 Casino Bot Düzenlenmiş Sürüm çalışıyor...")
+
+    print("🤖 Casino Bot çalışıyor...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
