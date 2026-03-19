@@ -256,6 +256,10 @@ def main_menu():
             InlineKeyboardButton("🎨 Kartım", callback_data="menu_mycard"),
         ],
         [
+            InlineKeyboardButton("➕ Beni Gruba Ekle", url=fixed_url(ADD_GROUP_URL)),
+            InlineKeyboardButton("🆘 Destek", url=fixed_url(SUPPORT_URL)),
+        ],
+        [
             InlineKeyboardButton("ℹ️ Yardım", callback_data="menu_help"),
         ]
     ]
