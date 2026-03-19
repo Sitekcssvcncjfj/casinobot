@@ -21,7 +21,7 @@ from telegram.ext import (
 # =========================
 TOKEN = os.getenv("BOT_TOKEN")
 ADMINS = [6101127840, 8189353497]
-DB_NAME = "casino.db"
+DB_NAME = "/app/data/casino.db"
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/")
 ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.me/")
