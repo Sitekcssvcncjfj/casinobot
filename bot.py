@@ -26,7 +26,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMINS = [6101127840, 8189353497]
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/")
-ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.meKGBCASINOBOT/")
+ADD_GROUP_URL = os.getenv("ADD_GROUP_URL", "https://t.me/KGBCASINOBOT")
 
 DB_DIR = os.getenv("DB_DIR", ".")
 os.makedirs(DB_DIR, exist_ok=True)
